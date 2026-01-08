@@ -1,0 +1,9 @@
+title: Shaheryar's AWS Blog
+email: khansheheriyar@gmail.com
+description: "My experiences building AWS projects"
+baseurl: "" # leave empty for GitHub Pages user site
+url: "https://sheheriyar99.github.io"
+
+theme: minima
+plugins:
+  - jekyll-feed
