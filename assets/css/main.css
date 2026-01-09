@@ -389,8 +389,83 @@ a:hover {
   gap: 1rem;
 }
 
-/* Post Page */
-.post-header {
+/* Blog Page Specific */
+.blog-page {
+  padding: 4rem 2rem;
+  background: var(--dark-bg);
+  min-height: 70vh;
+}
+
+.blog-page h1 {
+  font-size: 2.5rem;
+  color: var(--accent);
+  margin-bottom: 3rem;
+  letter-spacing: -0.5px;
+  text-align: center;
+}
+
+.blog-list {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.blog-list-item {
+  padding: 2rem;
+  margin-bottom: 2rem;
+  background: linear-gradient(135deg, rgba(84, 119, 146, 0.8), rgba(74, 107, 135, 0.6));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.blog-list-item:hover {
+  border-color: var(--accent);
+  transform: translateY(-5px);
+  box-shadow: 0 10px 30px rgba(148, 180, 193, 0.15);
+}
+
+.blog-list-item h2 {
+  font-size: 1.8rem;
+  color: var(--text-primary);
+  margin: 1rem 0;
+  line-height: 1.4;
+}
+
+.blog-list-item h2 a {
+  color: var(--accent);
+  transition: all 0.3s ease;
+}
+
+.blog-list-item h2 a:hover {
+  text-shadow: 0 0 10px rgba(148, 180, 193, 0.4);
+}
+
+.blog-list-item .excerpt {
+  color: var(--text-secondary);
+  margin: 1rem 0;
+  line-height: 1.8;
+  font-size: 1rem;
+}
+
+.blog-meta {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.date {
+  font-size: 0.9rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.categories {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
   padding: 4rem 2rem;
   background: linear-gradient(135deg, var(--dark-secondary) 0%, var(--dark-bg) 100%);
   text-align: center;
@@ -561,9 +636,7 @@ a:hover {
   border-top: 1px solid var(--border);
 }
 
-.footer-container {
-  max-width: 1200px;
-  margin: 0 auto;
+.footer-content {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 2rem;
@@ -571,6 +644,12 @@ a:hover {
 }
 
 .footer-section h4 {
+  color: var(--accent);
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.footer-section h3 {
   color: var(--accent);
   margin-bottom: 1rem;
   font-size: 1.1rem;
