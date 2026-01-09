@@ -84,14 +84,14 @@ a:hover {
 }
 
 .navbar-logo {
-  font-size: 1.8rem;
+  font-size: 1.3rem;
   font-weight: 800;
   letter-spacing: -0.5px;
   color: var(--accent);
-  display: flex;
-  align-items: center;
+  display: inline;
   gap: 0.8rem;
   transition: transform 0.3s ease;
+  white-space: nowrap;
 }
 
 .navbar-logo:hover {
@@ -100,8 +100,9 @@ a:hover {
 
 .navbar-menu {
   display: flex;
-  gap: 3rem;
+  gap: 2rem;
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 .nav-link {
@@ -183,14 +184,15 @@ a:hover {
   animation: fadeInUp 0.8s ease-out;
 }
 
-.hero h1 {
-  font-size: 4rem;
+.hero h1 {3.5rem;
   margin-bottom: 1.5rem;
   letter-spacing: -1px;
   background: var(--gradient-1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  font-weight: 900;
+  line-height: 1.2 text;
   font-weight: 900;
 }
 
@@ -268,10 +270,11 @@ a:hover {
   text-align: center;
   margin-bottom: 4rem;
 }
-
-.section-title h2 {
-  font-size: 2.8rem;
+5rem;
   color: var(--text-primary);
+  margin-bottom: 1rem;
+  letter-spacing: -0.5px;
+  line-height: 1.2ary);
   margin-bottom: 1rem;
   letter-spacing: -0.5px;
 }
@@ -649,22 +652,24 @@ a:hover {
   }
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  .hero h1 {
-    font-size: 2.5rem;
+/* Responsive */rem;
+    line-height: 1.2;
   }
 
   .hero p {
-    font-size: 1.1rem;
+    font-size: 1rem;
   }
 
   .navbar-menu {
-    gap: 1.5rem;
+    gap: 1rem;
+  }
+
+  .nav-link {
+    font-size: 0.85rem;
   }
 
   .section-title h2 {
-    font-size: 2rem;
+    font-size: 1.8rem;
   }
 
   .blog-grid {
@@ -672,7 +677,7 @@ a:hover {
   }
 
   .post-title {
-    font-size: 2rem;
+    font-size: 1.8rem;
   }
 
   .post-meta {
@@ -686,12 +691,12 @@ a:hover {
 }
 
 @media (max-width: 480px) {
-  .hero h1 {
-    font-size: 1.8rem;
+  body {
+    font-size: 14px;
   }
 
   .navbar {
-    padding: 1rem 0;
+    padding: 0.8rem 0;
   }
 
   .navbar-container {
@@ -699,21 +704,45 @@ a:hover {
   }
 
   .navbar-logo {
-    font-size: 1.3rem;
+    font-size: 1rem;
   }
 
   .navbar-menu {
-    gap: 1rem;
+    gap: 0.8rem;
   }
 
   .nav-link {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
+  }
+
+  .hero {
+    min-height: 60vh;
+    padding: 2rem 1rem;
+  }
+
+  .hero h1 {
+    font-size: 1.5rem;
+  }
+
+  .hero p {
+    font-size: 0.95rem;
+  }
+
+  .cta-button {
+    padding: 0.8rem 1.5rem;
+    font-size: 0.9rem;
+  }
+
+  .about h2 {
+    font-size: 1.8rem;
   }
 
   .blog-card {
     padding: 1.5rem;
   }
 
+  .post-title {
+    font-size: 1.5
   .cta-button {
     padding: 0.8rem 1.5rem;
     font-size: 0.9rem;
