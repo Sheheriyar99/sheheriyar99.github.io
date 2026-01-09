@@ -1,0 +1,17 @@
+title: Shaheryar’s Tech Blog
+description: Cloud, DevOps, AWS CDK, Linux, and Infrastructure as Code
+author: Shaheryar Khalid
+
+# IMPORTANT — must match your repo
+url: "https://sheheriyar99.github.io"
+baseurl: ""
+
+theme: minima
+
+markdown: kramdown
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+permalink: /:year/:month/:day/:title.html
