@@ -17,14 +17,6 @@ title: Home
   </div>
 </section>
 
-<!-- About Section -->
-<section class="about">
-  <div class="container">
-    <h2>Cloud Knowledge</h2>
-    <p>Expert insights into AWS services. Master EC2, Lambda, S3, databases, CDK, and advanced cloud architecture patterns with real-world examples.</p>
-  </div>
-</section>
-
 <!-- Latest Blog Posts -->
 <section class="blog-section" id="blog">
   <div class="container">
@@ -44,14 +36,5 @@ title: Home
       <a href="/blog" class="cta-button">View All Posts</a>
     </div>
     {% endif %}
-  </div>
-</section>
-
-<!-- CTA Section -->
-<section class="cta-section">
-  <div class="container">
-    <h2>Cloud Services</h2>
-    <p>Content for developers and architects. Learn modern cloud patterns and AWS best practices.</p>
-    <a href="/blog" class="cta-button">Explore All Articles</a>
   </div>
 </section>
