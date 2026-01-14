@@ -1,7 +1,7 @@
 l1---
 layout: post
 title: "Building Scalable AWS Infrastructure with CDK: A Modular Stack Architecture"
-date: 2026-01-11
+date: 2025-11-15
 categories: [AWS, CDK, Infrastructure, Architecture]
 tags: [aws-cdk, infrastructure-as-code, devops, architecture]
 ---

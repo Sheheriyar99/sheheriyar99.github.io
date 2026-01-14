@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Building an SMS-Based Review Collection System with AWS Lambda & DynamoDB"
-date: 2026-01-14
+date: 2025-12-03
 categories: [AWS, Serverless, Architecture, DynamoDB]
 tags: [lambda, dynamodb, sns, sms, architecture, review-system]
 excerpt: A complete serverless architecture for collecting customer reviews via SMS and web forms using AWS Lambda, DynamoDB, and SNS.
