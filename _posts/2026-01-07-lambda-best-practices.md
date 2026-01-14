@@ -745,6 +745,626 @@ fields @duration, @memoryUsed
 """
 ```
 
+## Real-World Case Study: Customer Review System
+
+Here's a practical implementation combining multiple best practices: a Lambda-based review collection system using DynamoDB, SNS, and SMS.
+
+### Architecture Overview
+
+```
+┌─────────────────┐
+│  Review Service │
+│ (Scheduled/API) │
+└────────┬────────┘
+         │
+         ▼
+┌──────────────────────────┐
+│  Lambda: SMS Broadcaster │
+│  - Read users from DDB   │
+│  - Send SMS via SNS      │
+└────────┬─────────────────┘
+         │
+         ├──► DynamoDB: Users Table
+         │    (user_id, phone, name)
+         │
+         └──► SNS: SMS Topic
+              │
+              ├──► SMS Service
+              │    │
+              │    └──► Customer Phone
+              │         (Review Link)
+              │
+              └──► Lambda: Form Handler
+                   (Serves HTML form)
+                        │
+                        ▼
+                   User Review
+                        │
+                        ▼
+              ┌──────────────────────────┐
+              │  Lambda: Review Processor│
+              │  - Validate review data  │
+              │  - Store in DynamoDB     │
+              │  - Publish to SNS        │
+              └──────────────────────────┘
+                        │
+                        ├──► DynamoDB: Reviews Table
+                        │    (review_id, user_id, rating, text, timestamp)
+                        │
+                        └──► SNS: Review Notifications
+                             (Alert admin/send confirmation)
+```
+
+### Implementation Details
+
+#### 1. SMS Broadcaster Lambda
+
+```python
+import json
+import boto3
+import logging
+from datetime import datetime
+from typing import List, Dict
+
+dynamodb = boto3.resource('dynamodb')
+sns = boto3.client('sns')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+users_table = dynamodb.Table(os.environ['USERS_TABLE'])
+sms_topic_arn = os.environ['SMS_TOPIC_ARN']
+review_form_url = os.environ['REVIEW_FORM_URL']
+
+def get_active_users() -> List[Dict]:
+    """Fetch all active users from DynamoDB"""
+    try:
+        response = users_table.scan(
+            FilterExpression='#status = :status AND #phone <> :empty',
+            ExpressionAttributeNames={
+                '#status': 'status',
+                '#phone': 'phone'
+            },
+            ExpressionAttributeValues={
+                ':status': 'active',
+                ':empty': ''
+            }
+        )
+        
+        logger.info(f"Retrieved {len(response['Items'])} active users")
+        return response['Items']
+    
+    except Exception as e:
+        logger.error(f"Failed to fetch users: {str(e)}", exc_info=True)
+        raise
+
+def send_sms_batch(users: List[Dict]) -> Dict:
+    """Send SMS to multiple users with retry logic"""
+    results = {
+        'sent': 0,
+        'failed': 0,
+        'errors': []
+    }
+    
+    for user in users:
+        try:
+            user_id = user['user_id']
+            phone = user['phone']
+            name = user.get('name', 'Valued Customer')
+            
+            # Create personalized review link
+            review_token = generate_review_token(user_id)
+            review_link = f"{review_form_url}?token={review_token}"
+            
+            # Craft SMS message
+            message = f"Hi {name}! Please share your feedback: {review_link}"
+            
+            # Publish to SNS for SMS delivery
+            response = sns.publish(
+                TopicArn=sms_topic_arn,
+                Message=message,
+                MessageAttributes={
+                    'AWS.SNS.SMS.SmsType': {
+                        'DataType': 'String',
+                        'StringValue': 'Transactional'  # Not promotional
+                    },
+                    'phone_number': {
+                        'DataType': 'String',
+                        'StringValue': phone
+                    }
+                }
+            )
+            
+            logger.info(f"SMS sent to {user_id}: MessageId={response['MessageId']}")
+            results['sent'] += 1
+            
+            # Log for audit trail
+            log_sms_sent(user_id, phone, response['MessageId'])
+        
+        except Exception as e:
+            logger.error(f"Failed to send SMS to {user.get('user_id')}: {str(e)}")
+            results['failed'] += 1
+            results['errors'].append({
+                'user_id': user.get('user_id'),
+                'error': str(e)
+            })
+    
+    return results
+
+def generate_review_token(user_id: str) -> str:
+    """Generate secure token for review form"""
+    import hmac
+    import hashlib
+    import base64
+    
+    secret = os.environ['TOKEN_SECRET']
+    timestamp = str(int(datetime.utcnow().timestamp()))
+    
+    data = f"{user_id}:{timestamp}"
+    signature = hmac.new(
+        secret.encode(),
+        data.encode(),
+        hashlib.sha256
+    ).digest()
+    
+    token = base64.urlsafe_b64encode(
+        f"{data}:{base64.b64encode(signature).decode()}".encode()
+    ).decode()
+    
+    return token
+
+def log_sms_sent(user_id: str, phone: str, message_id: str):
+    """Audit log for SMS sending"""
+    audit_table = dynamodb.Table(os.environ['AUDIT_TABLE'])
+    audit_table.put_item(
+        Item={
+            'event_id': f"{user_id}#{int(datetime.utcnow().timestamp() * 1000)}",
+            'timestamp': int(datetime.utcnow().timestamp()),
+            'user_id': user_id,
+            'phone': phone,
+            'message_id': message_id,
+            'event_type': 'SMS_SENT'
+        }
+    )
+
+def lambda_handler(event, context):
+    """Main handler for SMS broadcast"""
+    try:
+        logger.info("Starting SMS broadcast")
+        
+        # Get active users
+        users = get_active_users()
+        
+        if not users:
+            logger.warning("No active users found")
+            return {
+                'statusCode': 200,
+                'body': json.dumps({'message': 'No users to notify'})
+            }
+        
+        # Send SMS batch
+        results = send_sms_batch(users)
+        
+        logger.info(f"Broadcast complete: {results['sent']} sent, {results['failed']} failed")
+        
+        # Notify admin of results
+        publish_admin_notification(results)
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'SMS broadcast completed',
+                'results': results
+            })
+        }
+    
+    except Exception as e:
+        logger.error(f"Lambda execution failed: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'Internal server error'})
+        }
+
+def publish_admin_notification(results: Dict):
+    """Notify admin of broadcast results"""
+    admin_topic = os.environ['ADMIN_TOPIC_ARN']
+    sns.publish(
+        TopicArn=admin_topic,
+        Subject='SMS Broadcast Results',
+        Message=f"Sent: {results['sent']}\nFailed: {results['failed']}"
+    )
+```
+
+#### 2. Review Form Handler Lambda
+
+```python
+import json
+import os
+import logging
+from typing import Dict
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# HTML form template
+REVIEW_FORM_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Customer Review</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; }
+        .form-group { margin: 15px 0; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], textarea, select { width: 100%; padding: 8px; }
+        textarea { resize: vertical; min-height: 120px; }
+        button { background-color: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .rating { display: flex; gap: 10px; }
+        .star { font-size: 30px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Share Your Feedback</h1>
+    <form action="/submit-review" method="POST">
+        <input type="hidden" name="token" value="{token}">
+        
+        <div class="form-group">
+            <label>How would you rate your experience?</label>
+            <div class="rating">
+                <span class="star" onclick="setRating(1)">⭐</span>
+                <span class="star" onclick="setRating(2)">⭐</span>
+                <span class="star" onclick="setRating(3)">⭐</span>
+                <span class="star" onclick="setRating(4)">⭐</span>
+                <span class="star" onclick="setRating(5)">⭐</span>
+            </div>
+            <input type="hidden" id="rating" name="rating" value="0">
+        </div>
+        
+        <div class="form-group">
+            <label>Your Review (Optional)</label>
+            <textarea name="review_text" placeholder="Tell us more about your experience..."></textarea>
+        </div>
+        
+        <button type="submit">Submit Review</button>
+    </form>
+    
+    <script>
+        function setRating(stars) {
+            document.getElementById('rating').value = stars;
+            document.querySelectorAll('.star').forEach((star, idx) => {
+                star.style.opacity = idx < stars ? '1' : '0.3';
+            });
+        }
+        setRating(0);
+    </script>
+</body>
+</html>
+"""
+
+def lambda_handler(event, context):
+    """Serve review form HTML"""
+    try:
+        # Extract token from query parameters
+        token = event.get('queryStringParameters', {}).get('token')
+        
+        if not token:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Missing review token'})
+            }
+        
+        # Validate token
+        user_id = validate_token(token)
+        if not user_id:
+            return {
+                'statusCode': 401,
+                'body': json.dumps({'error': 'Invalid or expired token'})
+            }
+        
+        logger.info(f"Serving review form for user: {user_id}")
+        
+        # Return HTML form
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'text/html'
+            },
+            'body': REVIEW_FORM_HTML.format(token=token)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error serving form: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'body': 'Error loading review form'
+        }
+
+def validate_token(token: str) -> str:
+    """Validate and extract user_id from token"""
+    import hmac
+    import hashlib
+    import base64
+    from datetime import datetime
+    
+    try:
+        secret = os.environ['TOKEN_SECRET']
+        decoded = base64.urlsafe_b64decode(token.encode()).decode()
+        
+        parts = decoded.split(':')
+        if len(parts) < 3:
+            return None
+        
+        user_id = parts[0]
+        timestamp = int(parts[1])
+        signature = base64.b64decode(parts[2].encode())
+        
+        # Verify timestamp (valid for 7 days)
+        now = int(datetime.utcnow().timestamp())
+        if now - timestamp > 604800:  # 7 days
+            return None
+        
+        # Verify signature
+        data = f"{user_id}:{timestamp}"
+        expected_sig = hmac.new(
+            secret.encode(),
+            data.encode(),
+            hashlib.sha256
+        ).digest()
+        
+        if signature != expected_sig:
+            return None
+        
+        return user_id
+    
+    except Exception as e:
+        logger.error(f"Token validation failed: {str(e)}")
+        return None
+```
+
+#### 3. Review Processor Lambda
+
+```python
+import json
+import boto3
+import os
+import logging
+from datetime import datetime
+from typing import Dict
+
+dynamodb = boto3.resource('dynamodb')
+sns = boto3.client('sns')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+reviews_table = dynamodb.Table(os.environ['REVIEWS_TABLE'])
+review_topic_arn = os.environ['REVIEW_TOPIC_ARN']
+
+def validate_review(review_data: Dict) -> tuple[bool, str]:
+    """Validate review submission"""
+    
+    # Validate rating
+    rating = review_data.get('rating')
+    try:
+        rating = int(rating)
+        if rating < 1 or rating > 5:
+            return False, "Rating must be between 1 and 5"
+    except (ValueError, TypeError):
+        return False, "Invalid rating"
+    
+    # Validate review text (if provided)
+    review_text = review_data.get('review_text', '').strip()
+    if len(review_text) > 5000:
+        return False, "Review text too long (max 5000 characters)"
+    
+    return True, ""
+
+def store_review(user_id: str, rating: int, review_text: str) -> str:
+    """Store review in DynamoDB"""
+    
+    review_id = f"{user_id}#{int(datetime.utcnow().timestamp() * 1000)}"
+    
+    try:
+        reviews_table.put_item(
+            Item={
+                'review_id': review_id,
+                'user_id': user_id,
+                'rating': rating,
+                'review_text': review_text,
+                'timestamp': int(datetime.utcnow().timestamp()),
+                'status': 'new',  # For moderation workflow
+                'helpful_count': 0
+            }
+        )
+        
+        logger.info(f"Review stored: {review_id}")
+        return review_id
+    
+    except Exception as e:
+        logger.error(f"Failed to store review: {str(e)}", exc_info=True)
+        raise
+
+def publish_review_notification(review_id: str, user_id: str, rating: int):
+    """Publish review notification to SNS"""
+    
+    try:
+        sns.publish(
+            TopicArn=review_topic_arn,
+            Subject=f"New Review Submitted - {rating}⭐",
+            Message=json.dumps({
+                'review_id': review_id,
+                'user_id': user_id,
+                'rating': rating,
+                'timestamp': datetime.utcnow().isoformat(),
+                'action_url': f"{os.environ['ADMIN_DASHBOARD']}/reviews/{review_id}"
+            })
+        )
+    except Exception as e:
+        logger.error(f"Failed to publish notification: {str(e)}")
+        # Don't fail the review submission if notification fails
+
+def lambda_handler(event, context):
+    """Handle review submission"""
+    
+    try:
+        # Parse request body
+        if isinstance(event.get('body'), str):
+            body = json.loads(event['body'])
+        else:
+            body = event.get('body', {})
+        
+        logger.info(f"Processing review submission")
+        
+        # Validate token
+        token = body.get('token')
+        user_id = validate_token(token)
+        if not user_id:
+            return error_response(401, "Invalid or expired token")
+        
+        # Validate review data
+        is_valid, error_msg = validate_review(body)
+        if not is_valid:
+            return error_response(400, error_msg)
+        
+        rating = int(body['rating'])
+        review_text = body.get('review_text', '').strip()
+        
+        # Store review
+        review_id = store_review(user_id, rating, review_text)
+        
+        # Publish notification
+        publish_review_notification(review_id, user_id, rating)
+        
+        # Log for analytics
+        log_review_submitted(user_id, rating, review_id)
+        
+        return {
+            'statusCode': 201,
+            'body': json.dumps({
+                'message': 'Review submitted successfully',
+                'review_id': review_id
+            })
+        }
+    
+    except Exception as e:
+        logger.error(f"Review submission failed: {str(e)}", exc_info=True)
+        return error_response(500, "Failed to submit review")
+
+def error_response(status_code: int, message: str) -> Dict:
+    """Format error response"""
+    return {
+        'statusCode': status_code,
+        'body': json.dumps({'error': message})
+    }
+
+def log_review_submitted(user_id: str, rating: int, review_id: str):
+    """Log for analytics and tracking"""
+    analytics_table = dynamodb.Table(os.environ['ANALYTICS_TABLE'])
+    
+    try:
+        analytics_table.put_item(
+            Item={
+                'event_type#timestamp': f"review_submitted#{int(datetime.utcnow().timestamp())}",
+                'user_id': user_id,
+                'rating': rating,
+                'review_id': review_id,
+                'timestamp': int(datetime.utcnow().timestamp())
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log analytics: {str(e)}")
+
+def validate_token(token: str) -> str:
+    """Validate token (same as Form Handler)"""
+    import hmac
+    import hashlib
+    import base64
+    
+    try:
+        secret = os.environ['TOKEN_SECRET']
+        decoded = base64.urlsafe_b64decode(token.encode()).decode()
+        parts = decoded.split(':')
+        
+        if len(parts) < 3:
+            return None
+        
+        user_id = parts[0]
+        timestamp = int(parts[1])
+        
+        # Verify timestamp (7 day expiry)
+        now = int(datetime.utcnow().timestamp())
+        if now - timestamp > 604800:
+            return None
+        
+        return user_id
+    except Exception as e:
+        logger.error(f"Token validation failed: {str(e)}")
+        return None
+```
+
+### DynamoDB Table Schemas
+
+```json
+{
+  "Users Table": {
+    "TableName": "users",
+    "PrimaryKey": "user_id",
+    "Attributes": {
+      "user_id": "String",
+      "phone": "String",
+      "name": "String",
+      "email": "String",
+      "status": "String",
+      "created_at": "Number"
+    }
+  },
+  "Reviews Table": {
+    "TableName": "reviews",
+    "PrimaryKey": "review_id",
+    "GSI": [
+      {
+        "IndexName": "user_id-timestamp-index",
+        "PartitionKey": "user_id",
+        "SortKey": "timestamp"
+      },
+      {
+        "IndexName": "rating-timestamp-index",
+        "PartitionKey": "rating",
+        "SortKey": "timestamp"
+      }
+    ],
+    "Attributes": {
+      "review_id": "String",
+      "user_id": "String",
+      "rating": "Number",
+      "review_text": "String",
+      "timestamp": "Number",
+      "status": "String"
+    }
+  }
+}
+```
+
+### Key Best Practices Applied
+
+1. **Single Responsibility**: Each Lambda function has one job
+   - SMS Broadcaster: Send SMSs
+   - Form Handler: Serve HTML
+   - Review Processor: Handle submissions
+
+2. **Security**: Token-based authentication for review forms
+
+3. **Error Handling**: Try-catch blocks with proper logging
+
+4. **Monitoring**: Audit logs and analytics tracking
+
+5. **Scalability**: DynamoDB with appropriate indexes for queries
+
+6. **Cost Optimization**: Batch operations, efficient queries
+
+7. **Logging**: Structured JSON logs for debugging and analysis
+
+This real-world system demonstrates how to build a complete feature using Lambda, DynamoDB, and SNS following production best practices.
+
 ## Production Checklist
 
 Before deploying Lambda functions to production:
