@@ -1,4 +1,4 @@
----
+l1---
 layout: post
 title: "Building Scalable AWS Infrastructure with CDK: A Modular Stack Architecture"
 date: 2026-01-11
@@ -131,16 +131,16 @@ The infrastructure uses a `config.json` file for environment-specific settings:
 
 ```json
 {
-  "PROJECT_NAME": "ba-rel2",
+  "PROJECT_NAME": "mainapp",
   "ENVIRONMENT": "dev",
   "VPC_IP": "10.1.0.0/16",
   "db": {
     "username": "dbmasteruser",
     "password": "***",
-    "name": "barel1DB",
+    "name": "applicationDB",
     "port": "5432"
   },
-  "ba-rel2-svcTask": {
+  "mainapp-svcTask": {
     "cpu": 4096,
     "memory": 12288,
     "desiredCount": 1
