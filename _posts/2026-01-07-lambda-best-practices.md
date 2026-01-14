@@ -745,11 +745,287 @@ fields @duration, @memoryUsed
 """
 ```
 
-## Real-World Case Study: Customer Review System
+## Real-World Case Study: Customer Review System with Lambda, DynamoDB & SNS
 
-Here's a practical implementation combining multiple best practices: a Lambda-based review collection system using DynamoDB, SNS, and SMS.
+A complete production system for collecting customer reviews using AWS Lambda, DynamoDB, and SNS. This demonstrates how to combine multiple services and apply all best practices in a real-world scenario.
 
-### Architecture Overview
+### System Components
+
+#### 1. SMS Service (Amazon SNS)
+
+**Purpose**: Send SMS messages to customers with review links
+
+**Responsibilities**:
+- Triggered by Lambda SMS Broadcaster
+- Sends personalized SMS with unique review submission links
+- Handles delivery status and failures
+- Transactional SMS (not promotional)
+
+**Integration**:
+```python
+sns_client = boto3.client('sns')
+response = sns_client.publish(
+    TopicArn='arn:aws:sns:region:account:sms-topic',
+    Message=f'Hi {name}! Please share your feedback: {review_link}',
+    MessageAttributes={
+        'AWS.SNS.SMS.SmsType': {
+            'DataType': 'String',
+            'StringValue': 'Transactional'
+        }
+    }
+)
+```
+
+#### 2. Database (Amazon DynamoDB)
+
+**User Table**
+- **Primary Key**: `userId` (String)
+- **Attributes**:
+  - `userId`: Unique identifier (PK)
+  - `phone`: Phone number for SMS delivery
+  - `name`: Customer name
+  - `email`: Email address
+  - `status`: 'active' or 'inactive'
+  - `created_at`: Timestamp
+
+**Review Table**
+- **Primary Key**: `reviewId` (String) - Format: `{userId}#{timestamp}`
+- **Sort Key**: `timestamp` (Number)
+- **Attributes**:
+  - `reviewId`: Unique review identifier (PK)
+  - `userId`: Reference to customer (GSI)
+  - `reviewText`: Customer feedback text
+  - `rating`: Star rating (1-5)
+  - `date`: Submission timestamp
+  - `status`: 'new', 'approved', 'rejected' (for moderation)
+
+**DynamoDB Schema Example**:
+```json
+{
+  "UserTable": {
+    "TableName": "users",
+    "KeySchema": [
+      {"AttributeName": "userId", "KeyType": "HASH"}
+    ],
+    "BillingMode": "PAY_PER_REQUEST"
+  },
+  "ReviewTable": {
+    "TableName": "reviews",
+    "KeySchema": [
+      {"AttributeName": "reviewId", "KeyType": "HASH"},
+      {"AttributeName": "timestamp", "KeyType": "RANGE"}
+    ],
+    "GlobalSecondaryIndexes": [
+      {
+        "IndexName": "userId-timestamp-index",
+        "KeySchema": [
+          {"AttributeName": "userId", "KeyType": "HASH"},
+          {"AttributeName": "timestamp", "KeyType": "RANGE"}
+        ]
+      }
+    ],
+    "BillingMode": "PAY_PER_REQUEST"
+  }
+}
+```
+
+#### 3. Lambda Functions (Three-Function Architecture)
+
+**Lambda SMS Broadcaster**
+- Reads all active users from DynamoDB User Table
+- Generates unique review submission links with tokens
+- Sends SMS via SNS to each user
+- Logs delivery status for auditing
+- Handles errors and retries gracefully
+
+**Lambda 1 – Review Page Renderer (HTML Form Server)**
+- Triggered when user clicks SMS link
+- Validates authentication token
+- Serves HTML page with review form
+- Form contains:
+  - Label: "Please give your review"
+  - Star rating selector (1-5 stars)
+  - Text input field for review comments
+  - Submit button
+- On form submission, sends data to Lambda 2
+
+**Lambda 2 – Review Processor**
+- Receives form submission from user
+- Validates input data (rating, text length)
+- Stores review in DynamoDB Review Table
+- Publishes notification to SNS for admin alerting
+- Returns success/error response to user
+- Logs analytics for business metrics
+
+### System Flow (Complete Sequence)
+
+```
+Step 1: SMS Broadcast Trigger
+┌─────────────────────────┐
+│ Scheduled Event/API     │
+│ (Daily at 10 AM)        │
+└────────────┬────────────┘
+             ▼
+┌────────────────────────────────┐
+│ Lambda: SMS Broadcaster        │
+│ - Scan DynamoDB Users Table    │
+│ - Filter: status = 'active'    │
+│ - For each user:               │
+│   • Generate review token      │
+│   • Create review link         │
+│   • Send SMS via SNS           │
+└────────────┬───────────────────┘
+             │
+             ├─→ DynamoDB: Users Table ✓
+             │
+             └─→ SNS: SMS Topic ✓
+                    │
+                    ├─→ SMS Service
+                    │      │
+                    │      └──→ Customer Phone
+                    │           "Click here to review: https://..."
+                    │
+                    └─→ CloudWatch Logs (audit trail)
+
+
+Step 2: User Reviews Page Load
+┌──────────────────────────┐
+│ User clicks SMS link     │
+│ Opens: /review?token=xxx │
+└────────────┬─────────────┘
+             ▼
+┌────────────────────────────────┐
+│ Lambda 1: Review Page Renderer │
+│ - Extract token from URL       │
+│ - Validate token (HMAC)        │
+│ - Extract userId from token    │
+│ - Generate HTML form           │
+│ - Return HTML to browser       │
+└────────────┬───────────────────┘
+             │
+             └─→ Browser receives HTML form ✓
+                  ┌──────────────────────────┐
+                  │ HTML FORM DISPLAYED      │
+                  │                          │
+                  │ "Please give your review"│
+                  │ [⭐⭐⭐⭐⭐] Star rating  │
+                  │ [Text area for review]   │
+                  │ [Submit button]          │
+                  └──────────────────────────┘
+
+
+Step 3: User Submits Review
+┌──────────────────────────┐
+│ User fills form:         │
+│ - Selects 5-star rating  │
+│ - Types review text      │
+│ - Clicks Submit          │
+└────────────┬─────────────┘
+             ▼
+┌─────────────────────────────────┐
+│ Form posts to Lambda 2 endpoint  │
+│ POST /submit-review              │
+│                                  │
+│ Payload:                         │
+│ {                                │
+│   "token": "xxx...",             │
+│   "userId": "user-123",          │
+│   "reviewText": "Great product!",│
+│   "rating": 5,                   │
+│   "date": 1705238400000          │
+│ }                                │
+└────────────┬────────────────────┘
+             ▼
+┌──────────────────────────────┐
+│ Lambda 2: Review Processor   │
+│ - Validate token             │
+│ - Validate review data       │
+│ - Check rating (1-5)         │
+│ - Check text length (<5000)  │
+│ - Save to DynamoDB           │
+│ - Publish SNS notification   │
+└────────────┬─────────────────┘
+             │
+             ├─→ DynamoDB: Reviews Table ✓
+             │   {
+             │     "reviewId": "user-123#1705238400000",
+             │     "userId": "user-123",
+             │     "rating": 5,
+             │     "reviewText": "Great product!",
+             │     "date": 1705238400000,
+             │     "status": "new"
+             │   }
+             │
+             ├─→ SNS: Admin Notification Topic
+             │   Subject: "New Review - 5⭐"
+             │   Message: Review details for moderation
+             │
+             └─→ Response to user:
+                  Status: 201 Created
+                  Message: "Thank you for your review!"
+                  Admin Dashboard: /admin/reviews/user-123#1705238400000
+```
+
+### Architecture Diagram
+
+```
+┌─────────────────┐
+│  Review Service │
+│ (Scheduled/API) │
+└────────┬────────┘
+         │
+         ▼
+┌──────────────────────────┐
+│  Lambda: SMS Broadcaster │
+│  - Read users from DDB   │
+│  - Send SMS via SNS      │
+└────────┬─────────────────┘
+         │
+         ├──► DynamoDB: Users Table
+         │    (userId, phone, name, status)
+         │
+         └──► SNS: SMS Topic
+              │
+              ├──► AWS SMS Service
+              │    │
+              │    └──► Customer's Phone
+              │         (Receives link)
+              │
+              ▼
+        ┌─────────────────────┐
+        │ User's Browser      │
+        │ Clicks SMS Link     │
+        └────────┬────────────┘
+                 │
+                 ▼
+        ┌──────────────────────────┐
+        │ Lambda 1: Form Renderer  │
+        │ - Validate token         │
+        │ - Return HTML form       │
+        └────────┬─────────────────┘
+                 │
+                 ▼
+        ┌──────────────────────────┐
+        │ User Submits Review      │
+        │ (Star rating + text)     │
+        └────────┬─────────────────┘
+                 │
+                 ▼
+        ┌──────────────────────────┐
+        │ Lambda 2: Processor      │
+        │ - Validate data          │
+        │ - Store in DynamoDB      │
+        │ - Notify admin via SNS   │
+        └────────┬─────────────────┘
+                 │
+                 ├──► DynamoDB: Reviews Table
+                 │    (reviewId, userId, rating, text, date)
+                 │
+                 └──► SNS: Admin Notifications
+                      (Alert: New review needs moderation)
+```
+
+### Implementation Details
 
 ```
 ┌─────────────────┐
